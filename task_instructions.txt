@@ -1,0 +1,32 @@
+You are given a CSV file: dataset/history_signals.csv
+
+It contains numerical data with columns:
+    id, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15, x16, score
+
+The "score" column was computed from a SUBSET of x1-x16 using a deterministic
+mathematical formula. There is NO randomness or noise - the formula
+perfectly determines the score from the features. Not all columns are
+necessarily used in the formula.
+
+Your task:
+    Reverse-engineer the exact scoring formula by analysing the data.
+
+You must output a Python function with EXACTLY this signature:
+
+    def predict(x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15, x16):
+        # your formula here
+        return score
+
+IMPORTANT HINTS:
+    - The formula has roughly 7-8 terms.
+    - Not all 16 columns are used - part of the challenge is figuring out
+      which ones matter.
+    - It uses operations like: +, -, *, basic math functions (sin, cos,
+      floor), and conditionals (if/else with thresholds).
+    - Some functions take combinations of multiple variables as arguments,
+      not just single variables.
+    - Fitting a regression will OVERFIT and FAIL on unseen data.
+      The function is tested against 500 unseen rows.
+    - Think about what mathematical structures could produce the patterns
+      you see in the data, not just what fits the numbers.
+    - You may use the `math` module in your function.
