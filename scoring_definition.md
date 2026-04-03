@@ -2,7 +2,7 @@
 
 ## Method
 
-The model must output a Python function `def predict(x1, x2, x3, x4, x5, x6, x7, x8)`
+The model must output a Python function `def predict(x1, x2, ..., x16)`
 that computes a score from the features. This function is evaluated on a **hidden
 test set of 500 rows** that the model never saw.
 
@@ -19,16 +19,20 @@ Result is in **[0, 1]** where 1.0 = perfect match.
 
 ## Why this works
 
-The model sees 100 rows to reverse-engineer the formula. A regression fit may
-look good on training data but diverges on 500 unseen rows because it cannot
-capture:
+The model sees 100 rows to reverse-engineer the formula. A regression fit
+captures only partial variance (OLS baseline scores ~0.56) because it cannot
+represent the non-linear structure:
 
-- Trigonometric terms with multi-variable arguments (`sin(ax + by + cz)`)
-- Non-linear functions of variable interactions (`sqrt(x*y - z)`)
-- Piecewise conditionals with specific thresholds
-- Step functions (`floor`) with non-obvious divisors
+- Trigonometric terms oscillate many times across the variable range,
+  producing near-zero linear correlation with individual features
+- Piecewise conditionals create sharp thresholds that polynomials cannot
+  approximate without overfitting
+- Step functions (`floor`) with non-obvious divisors add discrete jumps
+- Feature selection among 16 columns (only a subset matters) adds noise
+  that degrades regression further
 
-Only the exact (or near-exact) formula scores well on the hidden test set.
+A regression-based answer will plateau around 0.5. Only discovering the
+actual mathematical structure pushes the score toward 1.0.
 
 ## Interpretation
 

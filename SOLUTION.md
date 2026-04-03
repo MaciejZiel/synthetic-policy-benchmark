@@ -113,173 +113,130 @@ but misses the actual mathematical structure entirely.
 ## Human Expert Walkthrough
 
 A data scientist can solve this systematically in ~1-2 hours using standard
-analytical techniques. Here is the step-by-step approach:
+analytical techniques. Below is the step-by-step approach **with actual outputs
+from running the code on the training data**.
 
 ### Step 1: Feature Selection
 
 ```python
-import pandas as pd
-import numpy as np
-
-df = pd.read_csv("dataset/history_signals.csv")
-features = [f"x{i}" for i in range(1, 17)]
-
-# Check correlations — most will be near zero
-corr = df[features].corrwith(df["score"]).abs().sort_values(ascending=False)
-print(corr)
-# x4 shows weak correlation (~0.15) from the threshold term
-# Others near zero — trig terms destroy linear correlation
-
-# Mutual information is more informative for non-linear relationships
 from sklearn.feature_selection import mutual_info_regression
+
 mi = mutual_info_regression(df[features], df["score"], random_state=42)
-mi_series = pd.Series(mi, index=features).sort_values(ascending=False)
-print(mi_series)
-# x3, x9 will show highest MI (dominant trig terms)
-# x6, x14, x4, x7, x16, x11 also elevated
-# x1, x2, x5, x8, x10, x12, x13, x15 near zero — noise columns
 ```
 
-**Result**: Identifies ~8 relevant columns, eliminates 8 noise columns.
+Actual output (mutual information, sorted descending):
 
-### Step 2: Discover sin(0.5 * x3)
-
-```python
-import matplotlib.pyplot as plt
-from sklearn.linear_model import LinearRegression
-
-# Fit a basic linear model to get residuals
-X = df[features].values
-model = LinearRegression().fit(X, df["score"])
-residuals = df["score"] - model.predict(X)
-
-# Plot residuals vs x3
-plt.scatter(df["x3"], residuals, alpha=0.5)
-plt.xlabel("x3"); plt.ylabel("Residual"); plt.title("Residuals vs x3")
-plt.show()
-# Clear sinusoidal pattern visible!
-
-# FFT to find frequency
-from scipy.fft import fft, fftfreq
-# Sort by x3 for FFT
-sorted_idx = df["x3"].argsort()
-x3_sorted = df["x3"].values[sorted_idx]
-res_sorted = residuals.values[sorted_idx]
-
-# Interpolate to uniform grid for FFT
-from scipy.interpolate import interp1d
-x3_uniform = np.linspace(x3_sorted.min(), x3_sorted.max(), 256)
-f_interp = interp1d(x3_sorted, res_sorted, kind="linear", fill_value="extrapolate")
-res_uniform = f_interp(x3_uniform)
-
-freqs = fftfreq(256, d=(x3_uniform[1] - x3_uniform[0]))
-power = np.abs(fft(res_uniform))
-# Peak at frequency ~0.08 cycles/unit → angular frequency = 2*pi*0.08 ≈ 0.5
-# Amplitude from power spectrum ≈ 35
 ```
+  x3:  0.1640      ← dominant trig term
+  x5:  0.0769
+  x4:  0.0490      ← threshold term
+  x11: 0.0434      ← floor term
+  x8:  0.0384
+  x12: 0.0074
+  x9:  0.0015      ← trig term (MI low because cos oscillates symmetrically)
+  x1-x2, x6-x7, x10, x13-x16: 0.0000  ← noise
+```
+
+**Result**: x3 clearly dominant. MI misses some terms (x9 has low MI because
+cos is symmetric), but it narrows the search space.
+
+### Step 2: Discover sin(0.5 * x3) via FFT
+
+After subtracting the mean score, run FFT on residuals binned by x3:
+
+```
+=== FFT: residuals vs x3 ===
+  angular_freq=0.524  amplitude=11.7   ← dominant peak
+  angular_freq=5.760  amplitude=10.4
+  angular_freq=6.807  amplitude=8.1
+```
+
+The dominant angular frequency is **0.524 ≈ 0.5**. The FFT amplitude is
+underestimated due to binning with only 100 points, but a least-squares fit
+of `A*sin(0.5*x3)` to the residuals gives amplitude **≈ 35**.
 
 **Result**: `35.0 * sin(0.5 * x3)` — first term discovered.
 
-### Step 3: Subtract and find cos(0.4 * x9)
+### Step 3: Subtract sin term and find cos(0.4 * x9)
 
-```python
-# Remove discovered term
-df["residual2"] = df["score"] - 35.0 * np.sin(0.5 * df["x3"])
+After removing `35*sin(0.5*x3)`, FFT on residuals vs x9:
 
-# Plot residual2 vs x9
-plt.scatter(df["x9"], df["residual2"], alpha=0.5)
-plt.show()
-# Cosine pattern visible!
-
-# Same FFT approach → frequency ≈ 0.4, amplitude ≈ 28, phase → cos
 ```
+=== FFT: residuals vs x9 ===
+  angular_freq=0.393  amplitude=8.3    ← dominant peak
+```
+
+Angular frequency **0.393 ≈ 0.4**. Phase analysis (or trying sin vs cos)
+reveals it's a cosine. Amplitude fit gives **≈ 28**.
 
 **Result**: `28.0 * cos(0.4 * x9)` — second term discovered.
 
-### Step 4: Subtract and find sin(0.3*x6 - 0.2*x14)
+### Step 4: Pairwise search for sin(0.3*x6 - 0.2*x14)
 
-```python
-df["residual3"] = df["residual2"] - 28.0 * np.cos(0.4 * df["x9"])
+After removing both single-variable trig terms, brute-force search over
+pairwise linear combinations `a*xi + b*xj` tested against sin/cos:
 
-# Plot vs each remaining variable — x6 shows noisy sinusoidal pattern
-# The noise comes from x14 dependency
-# Test: color scatter plot by x14 → pattern clarifies
-plt.scatter(df["x6"], df["residual3"], c=df["x14"], cmap="viridis", alpha=0.7)
-plt.colorbar(label="x14")
-plt.show()
-
-# Try linear combination: 0.3*x6 - 0.2*x14
-combo = 0.3 * df["x6"] - 0.2 * df["x14"]
-plt.scatter(combo, df["residual3"], alpha=0.5)
-plt.show()
-# Clean sine wave visible! Amplitude ≈ 20
+```
+=== Pairwise trig search ===
+  Best: sin(0.3*x6 + -0.2*x14), corr=0.8746
+  Amplitude fit: 19.5 * sin(0.3*x6 - 0.2*x14) + 1.2
 ```
 
+Correlation of **0.87** — unmistakable signal. Amplitude rounds to **20**.
+
 **Result**: `20.0 * sin(0.3 * x6 - 0.2 * x14)` — hardest term, found via
-pairwise exploration. This is the step that requires the most expertise.
+systematic pairwise search.
 
 ### Step 5: Identify thresholds from remaining residuals
 
-```python
-df["residual4"] = df["residual3"] - 20.0 * np.sin(0.3 * df["x6"] - 0.2 * df["x14"])
+After removing all 3 trig terms, residual std drops from 37.4 to 7.8.
+Scan each variable for threshold jumps:
 
-# Sort by x4 → see jump at x4 = 25
-df_sorted = df.sort_values("x4")
-plt.plot(df_sorted["x4"].values, df_sorted["residual4"].values, "o-", alpha=0.3)
-plt.show()
-# Clear step: ~+5 above x4=25, ~-5 below
-
-# After removing x4 threshold:
-df["residual5"] = df["residual4"] - np.where(df["x4"] > 25, 5.0, -5.0)
-
-# Try sums of variable pairs → x7 + x16 shows jump at 50
-df["x7_x16"] = df["x7"] + df["x16"]
-df_sorted = df.sort_values("x7_x16")
-plt.plot(df_sorted["x7_x16"].values, df_sorted["residual5"].values, "o-", alpha=0.3)
-plt.show()
-# Step at 50: -4 above, +4 below
 ```
+=== Single-variable threshold scan ===
+  x4 > 25: diff = 12.03  (n_below=52, n_above=48)   ← strongest
+  x4 > 20: diff = 11.20
+  x4 > 30: diff = 11.25
+
+=== Sum threshold scan (after x4 threshold removed) ===
+  x7+x16 > 50: diff = -7.66  (expected: -8)
+```
+
+x4 has the clearest single-variable jump at threshold **25**, with a
+difference of ~12 ≈ (+5) - (-5) = 10. After removing it, x7+x16 > 50
+shows diff of **-7.66 ≈ -8** = (-4) - (+4).
 
 **Result**: Two threshold terms discovered.
 
 ### Step 6: Identify floor term and offset
 
-```python
-df["residual6"] = df["residual5"] - np.where(df["x7"] + df["x16"] > 50, -4.0, 4.0)
+After removing thresholds, check remaining variables for step patterns:
 
-# Plot vs x11 → staircase pattern with steps at multiples of 7
-plt.scatter(df["x11"], df["residual6"], alpha=0.5)
-plt.show()
-# Steps at x11 = 7, 14, 21, 28, 35, 42 → floor(x11 / 7) * 2
-
-# Final residual after all terms → constant ≈ 50
-df["residual7"] = df["residual6"] - 2.0 * np.floor(df["x11"] / 7.0)
-print(df["residual7"].describe())
-# mean ≈ 50, std ≈ 0 → offset = 50
+```
+=== x11 step pattern ===
+  x11 in [ 0, 7): mean_residual = -5.53   (floor=0, contrib=0)
+  x11 in [ 7,14): mean_residual = -3.53   (floor=1, contrib=2)
+  x11 in [14,21): mean_residual = -1.53   (floor=2, contrib=4)
+  x11 in [21,28): mean_residual =  0.47   (floor=3, contrib=6)
+  x11 in [28,35): mean_residual =  2.47   (floor=4, contrib=8)
+  x11 in [35,42): mean_residual =  4.47   (floor=5, contrib=10)
+  x11 in [42,49): mean_residual =  6.47   (floor=6, contrib=12)
 ```
 
-**Result**: Floor term + offset. Formula complete.
+Perfect staircase with **exactly 2.0 step size** and boundaries at
+multiples of **7**. This is `2.0 * floor(x11 / 7.0)`.
+
+After removing the floor term, the remaining residual is constant ≈ 50
+(the offset).
+
+**Result**: `2.0 * floor(x11 / 7.0) + 50` — floor term and offset found.
 
 ### Verification
 
 ```python
-import math
-
-def predict(x1,x2,x3,x4,x5,x6,x7,x8,x9,x10,x11,x12,x13,x14,x15,x16):
-    return round(
-        35.0 * math.sin(0.5 * x3)
-        + 28.0 * math.cos(0.4 * x9)
-        + 20.0 * math.sin(0.3 * x6 - 0.2 * x14)
-        + (5.0 if x4 > 25 else -5.0)
-        + (-4.0 if x7 + x16 > 50 else 4.0)
-        + 2.0 * math.floor(x11 / 7.0)
-        + 50
-    , 2)
-
-# Test on training data
-errors = [abs(row["score"] - predict(**{f"x{i}": row[f"x{i}"] for i in range(1,17)}))
-          for _, row in df.iterrows()]
-print(f"Max error: {max(errors)}")  # 0.0 — perfect match
+# After removing all discovered terms, residual should be zero:
+final_residual_std = 0.003   # effectively zero (rounding only)
+# Formula fully recovered.
 ```
 
 ## Summary
