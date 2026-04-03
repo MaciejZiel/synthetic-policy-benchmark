@@ -206,6 +206,32 @@ A human data scientist uses visual-first analysis: plot, observe, hypothesize,
 subtract, repeat. LLMs default to regression-first analysis: fit, predict,
 overfit, fail. The benchmark exploits this methodological difference.
 
+## Execution Time
+
+Average time per run (5 turns), measured from runs 5-10:
+
+| Model | Avg Time | Min | Max | Notes |
+|---|---|---|---|---|
+| Llama 4 Maverick | **53s** | 33s | 81s | Fastest by far |
+| Claude Sonnet 4.5 | 180s | 39s | 243s | One run 39s (formula_found=False) |
+| Gemini 2.5 Pro | 469s | 181s | 1384s | High variance, one 23-min outlier |
+| GPT-5.2 | 499s | 211s | 1446s | Run 7 took 24 min (decision tree) |
+| Qwen 3 235B | 474s* | 351s | 755s* | Excluding Run 7 outlier (1449s) |
+| DeepSeek R1 | **1300s** | 652s | 1896s | Slowest -- extended reasoning overhead |
+
+Total wall-clock time for all 60 runs: ~5 hours.
+
+**Observations:**
+- DeepSeek R1 takes ~25x longer than Llama 4 Maverick per run due to chain-of-thought
+  reasoning. This extra thinking time does not translate to better average scores
+  (DeepSeek avg 0.21 vs Llama avg 0.25).
+- Claude Sonnet's 39s run (Run 8) had `formula_found=False` in the runner but
+  the formula was actually extracted -- the short time suggests it gave up early
+  or hit an error mid-conversation.
+- Gemini and GPT-5.2 occasionally take 20+ minutes on a single run when the model
+  generates complex code that takes long to execute (decision trees, brute-force
+  searches).
+
 ## Methodology
 
 - **API**: OpenRouter (all models accessed through unified API)
@@ -216,3 +242,4 @@ overfit, fail. The benchmark exploits this methodological difference.
 - **Scoring**: `score = 1 - clamp(MAE / P85_P15, 0, 1)` on 500 hidden rows
 - **P85_P15**: 78.18 (85th - 15th percentile of true scores)
 - **Runs**: 10 per model, 60 total
+- **Total execution time**: ~5 hours across all 60 runs
