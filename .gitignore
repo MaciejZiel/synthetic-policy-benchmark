@@ -9,4 +9,3 @@ htmlcov/
 .idea/
 *.py[cod]
 *.DS_Store
-.claude/
