@@ -94,3 +94,7 @@ Environment variables (`.env`):
 - `OPENROUTER_API_KEY` -- API key for OpenRouter
 - `MODEL_NAME` -- model identifier (default: `openai/gpt-5.2`)
 - `MAX_CALLS` -- number of conversation turns (default: `5`)
+
+## License
+
+MIT — see [LICENSE](LICENSE).
